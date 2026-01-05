@@ -1,0 +1,309 @@
+---
+title: "A Study on Efficacy of different treatment protocols based on survival outcome and increase in immunity metrics of the AIDS patients based on a double-blinded experiment"
+author: " Lasya Nandagiri"
+date: "2024-12-03"
+output:
+  pdf_document: default
+  html_document:
+    includes:
+      in_header: header.html
+    css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE, warning = FALSE)
+```
+
+
+```{r loading-libraries, include=FALSE}
+library(tidyverse)
+library(openintro)
+library(infer)
+```
+
+```{r - load-dataset, include=FALSE}
+study_dataset <- read.csv("AIDS_Clinical_Trials_Group_Study_175.csv")
+
+```
+
+
+```{r - efficacy-features-addition, include=FALSE}
+study_dataset <- study_dataset %>% 
+    mutate(diff_cd4_from_baseline = 
+             study_dataset$cd420 - study_dataset$cd40,
+           immunity_cd4_by_cd8_at_baseline = 
+             round(study_dataset$cd40/study_dataset$cd80,2),
+           immunity_cd4_by_cd8_at_20_weeks = 
+             round(study_dataset$cd420/study_dataset$cd820,2)
+           ) %>% 
+    mutate(diff_immunity_cd4_by_cd8 =
+             immunity_cd4_by_cd8_at_20_weeks - immunity_cd4_by_cd8_at_baseline)
+
+```
+
+# Abstract
+
+The study examines the effects and effectiveness of various AIDS treatment protocols, concentrating on the patient’s response to different therapeutic combinations, such as Zidovudine alone (ZDV), Zidovudine with Didanosine (ZDV + ddI), Zidovudine with Zalcitabine (ZDV + ZaL), and Didanosine alone (ddI). This research utilizes data from a double-masked clinical trial involving 2139 volunteer AIDS patients aged 12 and above for a period of at least two years. The data was obtained from the UC Irvine Machine Learning Repository and more information about the study is available in National Institute of Allergy and Infectious Diseases (NIAID).
+
+Key aspects of the analysis include survival outcomes, CD4 count changes over a period $20\pm5$ weeks from the baseline, and immunity differences across treatment groups. Statistical techniques such as Chi-squared tests, ANOVA, and F-tests were employed to examine the relationships between treatment groups and these clinical outcomes. The study thoroughly assessed the assumptions for each test, including data independence, normality, and variance consistency. While conditions for ANOVA on CD4 counts were satisfied, variability and outliers in the immunity data for the ZDV + ddI group precluded valid F-tests, highlighting the need for further investigation.
+
+Findings from the survival outcome analysis suggest significant differences among treatment protocols, indicating that therapeutic combinations influence patient survival rates. CD4 count evaluation also reveals variability in efficacy across treatments. However, challenges in analyzing immunity underscore the complexity of treatment effects and emphasize the importance of robust data validation.
+
+This study provides valuable insights into AIDS treatment efficacy and highlights the strengths and limitations of different therapeutic approaches. These findings aim to inform clinical practices and optimize treatment strategies, improving patient outcomes across diverse populations. Additional research using survival analysis is recommended to enhance the understanding of the best treatment protocol from the set.
+
+
+
+# Overview
+
+## Context of Data Collection
+
+The data used in the study was collected as part of a clinical trial designed to evaluate the efficacy of various AIDS treatment protocols. Below are the key elements of the data collection process:
+
+* Study Design
+  + An experimental study where volunteer AIDS patients were assigned to one of four treatment protocols.
+  + The study was conducted under a double-masked (double-blind) design to eliminate bias. Neither patients nor investigators knew the assigned treatment group.
+  + Patients were monitored for a minimum period of two years, which allowed for the collection of long-term outcomes.
+  
+* Participant Characteristics
+  + Eligibility 
+    - Patients aged 12 years or older diagnosed with AIDS.
+    - Patients needed to have consistent adherence to the assigned treatment for the duration of the study.
+  + Exclusions
+    - Patients with co-existing AIDS-related conditions.
+    - Patients undergoing concurrent treatments (e.g., radiotherapy) or using biologic response modifiers.
+    - Patients who had taken medication for unrelated ailments within 14 days before enrollment.
+
+* Types of information in the data
+  + Demographics: Age, gender, race.
+  + Behavioral Factors: History of IV drug use, sexual activity.
+  + Medical History: Baseline health conditions like hemophilia.
+  + Primary Treatment Response variable: Alive or dead during the period of study.
+  
+## Independent Variable
+
+For our study the primary independent variable is the Treatment protocols (`trt`). It has four categories of monotherapies and combination therapies for the AIDS patients.
+
+1. Zidovudine alone (ZDV)
+2. Zidovudine + Didanosine (ZDV + ddI)
+3. Zidovudine + Zalcitabine (ZDV + ZaL)
+4. Didanosine alone (ddI)
+  
+```{r trt-distribution, echo=FALSE, fig.align = 'center',out.width="50%", fig.cap="Distribution of Treatment Groups"}
+study_dataset$trt = as.factor(study_dataset$trt)
+plot_data <- study_dataset %>%
+              group_by(trt,) %>%
+              summarise(count = n(), .groups = "drop") %>%
+              mutate(proportion = count / sum(count)) %>%
+              ungroup()
+
+ggplot(data = plot_data
+         , aes(x = trt, y = count, fill = trt)) +
+    geom_bar(stat = "identity", position = "stack") +
+    geom_text(aes(label = scales::percent(proportion, accuracy = 0.1)),
+              position = position_stack(vjust = 0.5), color = "black"
+              , size = 6) +
+    geom_text(aes(label = count),
+              position = position_stack(vjust = 0.85), color = "white"
+              , size = 6) +
+    scale_fill_manual(values = c("coral", "tan", "thistle", "brown1"), 
+                    name = "Treatment Groups", 
+                    labels = c("ZDV only", "ZDV + ddI", 
+                               "ZDV + Zal", "ddI only"))+
+    ggtitle(paste("Distribution of Treatment Groups")) +
+    ylab(paste("count")) + 
+    xlab("Treatment Groups (trt)")
+
+```
+
+*Note: In one of the analysis, Chi-squared test for comparing between two groups was performed. There the notion of independent and dependent variable does not exist.*
+
+## Dependent Variables
+
+The current analysis has three aspects of understanding the efficacy of the treatment protocols on the AIDS patients. Therefore, these three variables are assigned as dependent variable in the respective analysis.
+
+1. Survival outcome (cid)
+  
+    The survival outcome denotes whether a patient is alive (censored) or dead during the course of the treatment. This is a raw variable and alignes with the primary goal of AIDS treatment - to prolong life and reduce mortality.
+    
+    ```{r cid-distribution, echo=FALSE, fig.align = 'center',out.width="50%", fig.cap="Distribution of survival outcome"}
+    study_dataset$cid = as.factor(study_dataset$cid)
+    plot_data <- study_dataset %>%
+                  group_by(cid,) %>%
+                  summarise(count = n(), .groups = "drop") %>%
+                  mutate(proportion = count / sum(count)) %>%
+                  ungroup()
+    
+    ggplot(data = plot_data
+             , aes(x = cid, y = count, fill = cid)) +
+        geom_bar(stat = "identity", position = "stack") +
+        geom_text(aes(label = scales::percent(proportion, accuracy = 0.1)),
+                  position = position_stack(vjust = 0.5), color = "black"
+                  , size = 6) +
+        geom_text(aes(label = count),
+                  position = position_stack(vjust = 0.85), color = "white"
+                  , size = 6) +
+        scale_fill_manual(values = c("violet", "orange"), 
+                        name = "cid", 
+                        labels = c("censored", "dead"))+
+        ggtitle(paste("Distribution of survival outcome")) +
+        ylab(paste("count")) + 
+        xlab("Survival Outcome(cid)")
+    
+    ```
+
+    ```{r func-numerical-variables-summary-across-trt-group, include = FALSE}
+    
+    num_var_summary_across_trt_group_func <- function(y_var, grp_var){
+      
+      
+      y_var <- sym(y_var)
+      grp_var <- sym(grp_var)
+      
+      grp_numerical_summary <- study_dataset %>%
+                            select(!!grp_var,!!y_var) %>%
+                            group_by(!!grp_var) %>%
+                            summarise(grp_min = min(!!y_var)
+                                    ,grp_25_p = quantile(!!y_var,0.25)
+                                    ,grp_mean = mean(!!y_var)
+                                    ,grp_median = median(!!y_var)
+                                    ,grp_75_p = quantile(!!y_var,0.75)
+                                    ,grp_max = max(!!y_var)
+                                    ,grp_sd = sd(!!y_var)
+                                    ,n = n()
+                                    )
+      return(grp_numerical_summary)
+    }
+    
+    num_var_summary_func <- function(y_var){
+      
+      y_var <- sym(y_var)
+      
+      numerical_summary <- study_dataset %>%
+                            select(!!y_var) %>%
+                            summarise(min = min(!!y_var)
+                                    ,v_25_p = quantile(!!y_var,0.25)
+                                    ,mean = mean(!!y_var)
+                                    ,median = median(!!y_var)
+                                    ,v_75_p = quantile(!!y_var,0.75)
+                                    ,max = max(!!y_var)
+                                    ,sd = sd(!!y_var)
+                                    ,n = n()
+                                    )
+      return(numerical_summary)
+    }
+    
+    ```
+
+2. Difference in cd4 count after $20\pm 5$ weeks from the baseline
+
+    CD4 count is a critical marker of immune system health. Changes in CD4 counts post-treatment reflect the therapy's ability to restore immune function and combat opportunistic infections. This is a derived variable using `cd4` and `cd420` variables in the data.
+    
+    ```{r diff_cd4_from_baseline-summary, echo=FALSE,}
+    knitr::kable(num_var_summary_func("diff_cd4_from_baseline"),caption = "Summary Statistics - Difference in cd4 count after 20 weeks from the baseline")
+    
+    
+    knitr::kable(num_var_summary_across_trt_group_func("diff_cd4_from_baseline", "cid"), caption = "Summary Statistics - Difference in cd4 count after 20 weeks from the baseline")
+    ```
+    
+3. Difference in Immunity after $20\pm 5$ weeks from the baseline
+
+    Immunity measure is defined by the ratio of `cd4 count`:`cd8 count`. It encompasses a broader immune responses beyond CD4 counts, provides a more comprehensive assessment of the body's ability to resist infections. This is a derived variable using `cd4` , `cd420`, `cd8` and `cd820` variables in the data.
+    
+    ```{r diff_immunity_cd4_by_cd8-summary, echo=FALSE}
+    knitr::kable(num_var_summary_func("diff_immunity_cd4_by_cd8"), caption = "Summary Statistics - Difference in Immunity after 20 weeks from the baseline")
+    
+    
+    knitr::kable(num_var_summary_across_trt_group_func("diff_immunity_cd4_by_cd8", "cid"),, caption = "Summary Statistics - Difference in Immunity after 20 weeks from the baseline wrt survival outcome (cid)")
+    ```
+    
+## Research Question
+
+Evaluation of the effect and efficacy of different AIDS treatment protocols based on survival outcome and increase in immunity metrics of the patients.
+
+The study was done in 3 aspects - the efficacy of treatment protocols with respect to
+1. Survival outcome
+2. Improvement in cd4 count over the period of treatment
+3. Improvement in immunity over the period of treatment
+
+The further sections will detail out the statistical analysis and the conclusion of each of these aspects.
+
+# Efficacy of treatment protocols with respect to Survival outcome (cid)
+
+As both the variables under consideration are categorical, and the focus is to understand whether the treatment group is independent of survival outcome, Chi-squared test was performed.
+
+## Test Setup
+
+* Variables under consideration: Treatment Groups (trt) vs survival outcome (cid)
+* Variable types: Categorical vs Categorical
+* Statistical test: Chi-squared test (Testing for independence in two-way tables)
+* Confidence Level: 95% ($alpha$=0.05)
+
+## Summary Statistics
+
+The two way table with actual and expected values are shown below
+
+```{r contingency-cid-trt, echo=FALSE}
+
+contingency_table <- table(study_dataset$cid, study_dataset$trt)
+
+dimnames(contingency_table) <- list(cid = c("Censored(0)", "Deceased(1)"),
+                     treatment = c("ZDV only", "ZDV + ddI", "ZDV + Zal", "ddI only"))
+
+knitr::kable(contingency_table, caption = "Two Way Table: Treatment protocols(trt) Vs Survival status (cid)")
+
+```
+
+```{r chi-sq-test-cid-trt-and-expected-count, echo = FALSE}
+
+# Chi-Square Test
+chi_result <- chisq.test(contingency_table)
+
+critical_value <- qchisq(0.95, df = 3)
+
+contingency_table_with_exp <- contingency_table; 
+contingency_table_with_exp[] <- paste(contingency_table,
+                                      paste0("(",round(chi_result$expected,2)
+                                             ,")"))
+
+knitr::kable(contingency_table_with_exp, caption = "Two Way Table with Actual and Expected Values: Treatment protocols(trt) Vs Survival status (cid)")
+
+```
+
+## Conditions
+
+* The observations should be independent
+    - The data is from a double blinded controlled experiment. The patients in inter and intra treatment groups are independent of each other.
+
+* Expected counts for each cell should be at least 5
+    - The expected values are greater than 5 as seen in the previous slide as seen in *Table 5*.
+    
+* Degrees of freedom should be at least 2
+    - `df = (R - 1) x (C - 1)`, where R is number of rows and C is number of columns
+    
+      `df = (2 - 1) x (4 - 1) = 3`, hence the condition is satisfied
+
+Hence, all the conditions for the Chi-squared test for independence are satisfied
+
+## Hypothesis
+
+* Null Hypothesis
+    - H0: There is no difference in the efficacy of the four treatment protocols. The survival outcome is independent of the treatment groups.
+
+* Alternative Hypothesis
+    - HA: There is some difference in efficacy between the four treatment protocols. The type of treatment given has some effect on the survival outcome.
+    
+
+
+
+
+
+
+
+
+
